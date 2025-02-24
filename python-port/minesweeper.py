@@ -1,0 +1,739 @@
+#!/usr/bin/env python3
+"""
+Keith Manaloto's Minesweeper game from https://github.com/keithliam/ics-os-minesweeper?tab=readme-ov-file.
+Ported from C to Python by ChatGPT o3-mini-high.
+
+This uses pygame to create a window (scaled from a 320×200 virtual resolution)
+and implements the same game algorithm as in the original C code.
+"""
+
+import pygame, sys, random, time
+
+# --- Virtual Screen and Scale ---
+SCREEN_WIDTH = 320
+SCREEN_HEIGHT = 200
+SCALE = 3
+
+# --- Color and Game Constants ---
+# (Some constants have been reassigned unique values for drawing purposes)
+NUM_1_COLOR = 11
+NUM_2_COLOR = 18
+NUM_3_COLOR = 60
+NUM_4_COLOR = 15
+NUM_5_COLOR = 36
+NUM_6_COLOR = 3
+NUM_7_COLOR = 64
+NUM_8_COLOR = 7
+FLAG_COLOR = 72
+FLAGSTICK_COLOR = 20
+MINE_COLOR = 75
+MINE_CENTER_COLOR = 74
+MINE_SELECTED_COLOR = 4
+CELL_COLOR = 71
+SELECTED_COLOR = 55
+EMPTY_COLOR = 77
+BACKGROUND_COLOR = 78
+TEXT_COLOR = 63
+
+color_map = {
+    NUM_1_COLOR: (0, 0, 255),        # Blue
+    NUM_2_COLOR: (0, 128, 0),        # Green
+    NUM_3_COLOR: (255, 0, 0),        # Red
+    NUM_4_COLOR: (128, 0, 128),      # Purple
+    NUM_5_COLOR: (128, 0, 0),        # Maroon
+    NUM_6_COLOR: (0, 128, 128),      # Teal
+    NUM_7_COLOR: (0, 0, 0),          # Black
+    NUM_8_COLOR: (128, 128, 128),    # Gray
+    FLAG_COLOR: (255, 0, 0),         # Red flag
+    FLAGSTICK_COLOR: (0, 0, 0),      # Black flag stick
+    MINE_COLOR: (0, 0, 0),           # Black mine
+    MINE_CENTER_COLOR: (255, 255, 0),# Yellow center
+    MINE_SELECTED_COLOR: (255, 0, 0),# Red when selected
+    CELL_COLOR: (192, 192, 192),     # Light gray cell
+    SELECTED_COLOR: (0, 255, 0),     # Green selection
+    EMPTY_COLOR: (255, 255, 255),    # White
+    BACKGROUND_COLOR: (64, 64, 64),  # Dark gray
+    TEXT_COLOR: (255, 255, 255)      # White text
+}
+
+# --- Game Board Constants ---
+EMPTY = 0
+NUM_1 = 1
+NUM_2 = 2
+NUM_3 = 3
+NUM_4 = 4
+NUM_5 = 5
+NUM_6 = 6
+NUM_7 = 7
+NUM_8 = 8
+MINE = 10
+HIDDEN = 0
+REVEALED = 1
+HIDDEN_FLAGGED = 3
+
+# --- Board Sizes and Mine Counts ---
+SMALL = 8
+MEDIUM = 16
+LARGE = 24
+SMALL_MINES = 10
+MEDIUM_MINES = 40
+LARGE_MINES = 99
+
+# --- Game Outcome Identifiers ---
+NONE = 0
+WIN = 1
+LOSE = 2
+
+# --- Text Strings for Menus ---
+LOGO_MENU_TEXT = "MINESWEEPER"
+START_MENU_TEXT = "[1] Start Game"
+CONTROLS_MENU_TEXT = "[2] Controls"
+ABOUT_MENU_TEXT = "[3] About"
+EXIT_MENU_TEXT = "[4] Exit"
+START_GAME_HEADER = "Choose Difficulty"
+EASY_GAME_TEXT = "[1] Easy (8x8, 10 mines)"
+MEDIUM_GAME_TEXT = "[2] Medium (16x16, 40 mines)"
+HARD_GAME_TEXT = "[3] Hard (24x24, 99 mines)"
+STATUS_LOGO = "MINESWEEPER"
+STATUS_MINES_LEFT = "MINES LEFT: "
+WIN_TEXT = "YOU WIN!"
+CONTROLS_HEADER = "GAME CONTROLS"
+CONTROLS_MOVE_UP = "Move Up    - W"
+CONTROLS_MOVE_LEFT = "Move Left  - A"
+CONTROLS_MOVE_DOWN = "Move Down  - S"
+CONTROLS_MOVE_RIGHT = "Move Right - D"
+CONTROLS_SELECT = "Select     - Space"
+CONTROLS_FLAG = "Flag       - F"
+CONTROLS_RESTART = "Restart    - R"
+CONTROLS_QUIT_GAME = "Quit Game  - Q"
+ABOUT_PROJECT_INFO_1 = "CMSC 125 T-6L"
+ABOUT_PROJECT_INFO_2 = "13 May 2018"
+ABOUT_UI = "Game UI:"
+ABOUT_UI_TEXT = "Keith Liam Manaloto"
+ABOUT_IMPLEMENTATION = "Implementation:"
+ABOUT_IMPLEMENTATION_TEXT = "Juan Miguel Galvez"
+PRESS_ANY_KEY = "(Press any key to continue)"
+ABOUT_HEADER = "ABOUT"
+
+# --- Dimensions ---
+CELL_SIZE = 7
+TEXT_SIZE = 7
+TEXT_LARGE_BOARD_OFFSET = 5
+
+# --- Global Game State Variables ---
+boardLength = 0
+selectionX = 0
+selectionY = 0
+offsetX = 0
+offsetY = 0
+textBoardOffset = 0
+hiddenCount = 0
+initialMines = 0
+minesLeft = 0
+flagCount = 0
+board = []
+hiddenBoard = []
+
+# --- Pygame Initialization ---
+pygame.init()
+screen = pygame.display.set_mode((SCREEN_WIDTH * SCALE, SCREEN_HEIGHT * SCALE))
+pygame.display.set_caption("Minesweeper")
+font = pygame.font.SysFont("Arial", 12)
+
+# --- Drawing Functions ---
+
+def write_pixel(x, y, color_index):
+    color = color_map.get(color_index, (0, 0, 0))
+    pygame.draw.rect(screen, color, (x * SCALE, y * SCALE, SCALE, SCALE))
+
+def draw_box(x, y, width, height, color_index):
+    color = color_map.get(color_index, (0, 0, 0))
+    pygame.draw.rect(screen, color, (x * SCALE, y * SCALE, width * SCALE, height * SCALE))
+
+def write_text(text, x, y, color_index, flag):
+    color = color_map.get(color_index, (255, 255, 255))
+    text_surface = font.render(text, True, color)
+    screen.blit(text_surface, (x * SCALE, y * SCALE))
+
+def draw_background():
+    screen.fill(color_map[BACKGROUND_COLOR])
+    pygame.display.flip()
+
+def draw_mine(x, y):
+    write_pixel(x + 3, y + 1, MINE_COLOR)
+    write_pixel(x + 2, y + 2, MINE_COLOR)
+    write_pixel(x + 3, y + 2, MINE_COLOR)
+    write_pixel(x + 4, y + 2, MINE_COLOR)
+    write_pixel(x + 1, y + 3, MINE_COLOR)
+    write_pixel(x + 2, y + 3, MINE_COLOR)
+    write_pixel(x + 3, y + 3, MINE_CENTER_COLOR)
+    write_pixel(x + 4, y + 3, MINE_COLOR)
+    write_pixel(x + 5, y + 3, MINE_COLOR)
+    write_pixel(x + 2, y + 4, MINE_COLOR)
+    write_pixel(x + 3, y + 4, MINE_COLOR)
+    write_pixel(x + 4, y + 4, MINE_COLOR)
+    write_pixel(x + 3, y + 5, MINE_COLOR)
+
+def draw_num1(x, y):
+    write_pixel(x + 2, y + 1, NUM_1_COLOR)
+    write_pixel(x + 3, y + 1, NUM_1_COLOR)
+    write_pixel(x + 3, y + 2, NUM_1_COLOR)
+    write_pixel(x + 3, y + 3, NUM_1_COLOR)
+    write_pixel(x + 3, y + 4, NUM_1_COLOR)
+    write_pixel(x + 2, y + 5, NUM_1_COLOR)
+    write_pixel(x + 3, y + 5, NUM_1_COLOR)
+    write_pixel(x + 4, y + 5, NUM_1_COLOR)
+
+def draw_num2(x, y):
+    write_pixel(x + 2, y + 1, NUM_2_COLOR)
+    write_pixel(x + 3, y + 1, NUM_2_COLOR)
+    write_pixel(x + 4, y + 1, NUM_2_COLOR)
+    write_pixel(x + 4, y + 2, NUM_2_COLOR)
+    write_pixel(x + 4, y + 3, NUM_2_COLOR)
+    write_pixel(x + 3, y + 3, NUM_2_COLOR)
+    write_pixel(x + 2, y + 3, NUM_2_COLOR)
+    write_pixel(x + 2, y + 4, NUM_2_COLOR)
+    write_pixel(x + 2, y + 5, NUM_2_COLOR)
+    write_pixel(x + 3, y + 5, NUM_2_COLOR)
+    write_pixel(x + 4, y + 5, NUM_2_COLOR)
+
+def draw_num3(x, y):
+    write_pixel(x + 2, y + 1, NUM_3_COLOR)
+    write_pixel(x + 3, y + 1, NUM_3_COLOR)
+    write_pixel(x + 4, y + 1, NUM_3_COLOR)
+    write_pixel(x + 4, y + 2, NUM_3_COLOR)
+    write_pixel(x + 2, y + 3, NUM_3_COLOR)
+    write_pixel(x + 3, y + 3, NUM_3_COLOR)
+    write_pixel(x + 4, y + 3, NUM_3_COLOR)
+    write_pixel(x + 4, y + 4, NUM_3_COLOR)
+    write_pixel(x + 2, y + 5, NUM_3_COLOR)
+    write_pixel(x + 3, y + 5, NUM_3_COLOR)
+    write_pixel(x + 4, y + 5, NUM_3_COLOR)
+
+def draw_num4(x, y):
+    write_pixel(x + 2, y + 1, NUM_4_COLOR)
+    write_pixel(x + 4, y + 1, NUM_4_COLOR)
+    write_pixel(x + 2, y + 2, NUM_4_COLOR)
+    write_pixel(x + 4, y + 2, NUM_4_COLOR)
+    write_pixel(x + 2, y + 3, NUM_4_COLOR)
+    write_pixel(x + 3, y + 3, NUM_4_COLOR)
+    write_pixel(x + 4, y + 3, NUM_4_COLOR)
+    write_pixel(x + 4, y + 4, NUM_4_COLOR)
+    write_pixel(x + 4, y + 5, NUM_4_COLOR)
+
+def draw_num5(x, y):
+    write_pixel(x + 2, y + 1, NUM_5_COLOR)
+    write_pixel(x + 3, y + 1, NUM_5_COLOR)
+    write_pixel(x + 4, y + 1, NUM_5_COLOR)
+    write_pixel(x + 2, y + 2, NUM_5_COLOR)
+    write_pixel(x + 2, y + 3, NUM_5_COLOR)
+    write_pixel(x + 3, y + 3, NUM_5_COLOR)
+    write_pixel(x + 4, y + 3, NUM_5_COLOR)
+    write_pixel(x + 4, y + 4, NUM_5_COLOR)
+    write_pixel(x + 2, y + 5, NUM_5_COLOR)
+    write_pixel(x + 3, y + 5, NUM_5_COLOR)
+    write_pixel(x + 4, y + 5, NUM_5_COLOR)
+
+def draw_num6(x, y):
+    write_pixel(x + 2, y + 1, NUM_6_COLOR)
+    write_pixel(x + 3, y + 1, NUM_6_COLOR)
+    write_pixel(x + 4, y + 1, NUM_6_COLOR)
+    write_pixel(x + 2, y + 2, NUM_6_COLOR)
+    write_pixel(x + 2, y + 3, NUM_6_COLOR)
+    write_pixel(x + 3, y + 3, NUM_6_COLOR)
+    write_pixel(x + 4, y + 3, NUM_6_COLOR)
+    write_pixel(x + 2, y + 4, NUM_6_COLOR)
+    write_pixel(x + 4, y + 4, NUM_6_COLOR)
+    write_pixel(x + 2, y + 5, NUM_6_COLOR)
+    write_pixel(x + 3, y + 5, NUM_6_COLOR)
+    write_pixel(x + 4, y + 5, NUM_6_COLOR)
+
+def draw_num7(x, y):
+    write_pixel(x + 2, y + 1, NUM_7_COLOR)
+    write_pixel(x + 3, y + 1, NUM_7_COLOR)
+    write_pixel(x + 4, y + 1, NUM_7_COLOR)
+    write_pixel(x + 4, y + 2, NUM_7_COLOR)
+    write_pixel(x + 3, y + 3, NUM_7_COLOR)
+    write_pixel(x + 3, y + 4, NUM_7_COLOR)
+    write_pixel(x + 3, y + 5, NUM_7_COLOR)
+
+def draw_num8(x, y):
+    write_pixel(x + 2, y + 1, NUM_8_COLOR)
+    write_pixel(x + 3, y + 1, NUM_8_COLOR)
+    write_pixel(x + 4, y + 1, NUM_8_COLOR)
+    write_pixel(x + 2, y + 2, NUM_8_COLOR)
+    write_pixel(x + 4, y + 2, NUM_8_COLOR)
+    write_pixel(x + 2, y + 3, NUM_8_COLOR)
+    write_pixel(x + 3, y + 3, NUM_8_COLOR)
+    write_pixel(x + 4, y + 3, NUM_8_COLOR)
+    write_pixel(x + 2, y + 4, NUM_8_COLOR)
+    write_pixel(x + 4, y + 4, NUM_8_COLOR)
+    write_pixel(x + 2, y + 5, NUM_8_COLOR)
+    write_pixel(x + 3, y + 5, NUM_8_COLOR)
+    write_pixel(x + 4, y + 5, NUM_8_COLOR)
+
+def draw_flag(x, y):
+    write_pixel(x + 1, y + 1, FLAG_COLOR)
+    write_pixel(x + 2, y + 1, FLAG_COLOR)
+    write_pixel(x + 3, y + 1, FLAG_COLOR)
+    write_pixel(x + 1, y + 2, FLAG_COLOR)
+    write_pixel(x + 2, y + 2, FLAG_COLOR)
+    write_pixel(x + 3, y + 2, FLAG_COLOR)
+    write_pixel(x + 1, y + 3, FLAG_COLOR)
+    write_pixel(x + 2, y + 3, FLAG_COLOR)
+    write_pixel(x + 3, y + 3, FLAG_COLOR)
+    write_pixel(x + 4, y + 1, FLAGSTICK_COLOR)
+    write_pixel(x + 4, y + 2, FLAGSTICK_COLOR)
+    write_pixel(x + 4, y + 3, FLAGSTICK_COLOR)
+    write_pixel(x + 4, y + 4, FLAGSTICK_COLOR)
+    write_pixel(x + 4, y + 5, FLAGSTICK_COLOR)
+
+def is_selected(i, j):
+    return (j == selectionX and i == selectionY)
+
+def draw_cell(i, j):
+    col = (j * CELL_SIZE) + offsetX
+    row = (i * CELL_SIZE) + offsetY
+    if is_selected(i, j) and hiddenBoard[i][j] == REVEALED and board[i][j] == MINE:
+        draw_box(col, row, CELL_SIZE, CELL_SIZE, MINE_SELECTED_COLOR)
+    elif is_selected(i, j) and hiddenBoard[i][j] == REVEALED:
+        draw_box(col, row, CELL_SIZE, CELL_SIZE, SELECTED_COLOR)
+    elif hiddenBoard[i][j] == REVEALED:
+        draw_box(col, row, CELL_SIZE, CELL_SIZE, EMPTY_COLOR)
+    if is_selected(i, j) and hiddenBoard[i][j] == HIDDEN:
+        draw_box(col, row, CELL_SIZE, CELL_SIZE, SELECTED_COLOR)
+    elif hiddenBoard[i][j] == HIDDEN:
+        draw_box(col, row, CELL_SIZE, CELL_SIZE, CELL_COLOR)
+    elif is_selected(i, j) and hiddenBoard[i][j] == HIDDEN_FLAGGED:
+        draw_box(col, row, CELL_SIZE, CELL_SIZE, SELECTED_COLOR)
+    elif hiddenBoard[i][j] == HIDDEN_FLAGGED:
+        draw_box(col, row, CELL_SIZE, CELL_SIZE, CELL_COLOR)
+    elif board[i][j] == NUM_1:
+        draw_num1(col, row)
+    elif board[i][j] == NUM_2:
+        draw_num2(col, row)
+    elif board[i][j] == NUM_3:
+        draw_num3(col, row)
+    elif board[i][j] == NUM_4:
+        draw_num4(col, row)
+    elif board[i][j] == NUM_5:
+        draw_num5(col, row)
+    elif board[i][j] == NUM_6:
+        draw_num6(col, row)
+    elif board[i][j] == NUM_7:
+        draw_num7(col, row)
+    elif board[i][j] == NUM_8:
+        draw_num8(col, row)
+    elif board[i][j] == MINE:
+        draw_mine(col, row)
+    if hiddenBoard[i][j] == HIDDEN_FLAGGED:
+        draw_flag(col, row)
+
+def draw_board():
+    for i in range(boardLength):
+        for j in range(boardLength):
+            draw_cell(i, j)
+    pygame.display.flip()
+
+def draw_status_logo():
+    write_text(STATUS_LOGO, 10, 10, TEXT_COLOR, 0)
+
+def draw_status_mines():
+    write_text(STATUS_MINES_LEFT, 187, 10, TEXT_COLOR, 0)
+
+def draw_status_mines_num():
+    write_text(str(minesLeft), 295, 10, TEXT_COLOR, 0)
+
+def draw_status_bar():
+    draw_status_logo()
+    draw_status_mines()
+    draw_status_mines_num()
+
+def draw_game():
+    draw_status_bar()
+    draw_board()
+
+def update_status_mines_num():
+    draw_box(295, 10, 18, 7, BACKGROUND_COLOR)
+    draw_status_mines_num()
+    pygame.display.flip()
+
+def update_game():
+    update_status_mines_num()
+    draw_board()
+
+def update_two_cells(x, y, newX, newY):
+    draw_cell(y, x)
+    draw_cell(newY, newX)
+    pygame.display.flip()
+
+def move_selection(direction):
+    global selectionX, selectionY
+    x = selectionX
+    y = selectionY
+    if direction == "w" and selectionY - 1 >= 0:
+        selectionY -= 1
+    elif direction == "a" and selectionX - 1 >= 0:
+        selectionX -= 1
+    elif direction == "s" and selectionY + 1 < boardLength:
+        selectionY += 1
+    elif direction == "d" and selectionX + 1 < boardLength:
+        selectionX += 1
+    update_two_cells(x, y, selectionX, selectionY)
+
+def is_flag(x, y):
+    if x < 0 or y < 0 or x >= boardLength or y >= boardLength:
+        return False
+    return hiddenBoard[y][x] == HIDDEN_FLAGGED
+
+def is_num(x, y):
+    if x < 0 or y < 0 or x >= boardLength or y >= boardLength:
+        return False
+    return board[y][x] in (EMPTY, NUM_1, NUM_2, NUM_3, NUM_4, NUM_5, NUM_6, NUM_7, NUM_8)
+
+def is_hidden(x, y):
+    if x < 0 or y < 0 or x >= boardLength or y >= boardLength:
+        return False
+    return hiddenBoard[y][x] in (HIDDEN, HIDDEN_FLAGGED)
+
+def reveal_cells(x, y):
+    global hiddenCount
+    if x < 0 or y < 0 or x >= boardLength or y >= boardLength:
+        return NONE
+    hiddenCount -= 1
+    hiddenBoard[y][x] = REVEALED
+    if board[y][x] == EMPTY:
+        if not is_flag(x - 1, y) and is_hidden(x - 1, y): reveal_cells(x - 1, y)
+        if not is_flag(x, y - 1) and is_hidden(x, y - 1): reveal_cells(x, y - 1)
+        if not is_flag(x + 1, y) and is_hidden(x + 1, y): reveal_cells(x + 1, y)
+        if not is_flag(x, y + 1) and is_hidden(x, y + 1): reveal_cells(x, y + 1)
+        if not is_flag(x - 1, y - 1) and is_hidden(x - 1, y - 1): reveal_cells(x - 1, y - 1)
+        if not is_flag(x - 1, y + 1) and is_hidden(x - 1, y + 1): reveal_cells(x - 1, y + 1)
+        if not is_flag(x + 1, y - 1) and is_hidden(x + 1, y - 1): reveal_cells(x + 1, y - 1)
+        if not is_flag(x + 1, y + 1) and is_hidden(x + 1, y + 1): reveal_cells(x + 1, y + 1)
+    draw_cell(y, x)
+    pygame.display.flip()
+    return NONE
+
+def get_number_of_mines(num):
+    if num == EMPTY: return 0
+    elif num == NUM_1: return 1
+    elif num == NUM_2: return 2
+    elif num == NUM_3: return 3
+    elif num == NUM_4: return 4
+    elif num == NUM_5: return 5
+    elif num == NUM_6: return 6
+    elif num == NUM_7: return 7
+    elif num == NUM_8: return 8
+    return 0
+
+def get_number_of_flags(x, y):
+    flagCtr = 0
+    if y - 1 >= 0 and x - 1 >= 0 and hiddenBoard[y - 1][x - 1] == HIDDEN_FLAGGED: flagCtr += 1
+    if y - 1 >= 0 and x + 1 < boardLength and hiddenBoard[y - 1][x + 1] == HIDDEN_FLAGGED: flagCtr += 1
+    if y + 1 < boardLength and x - 1 >= 0 and hiddenBoard[y + 1][x - 1] == HIDDEN_FLAGGED: flagCtr += 1
+    if y + 1 < boardLength and x + 1 < boardLength and hiddenBoard[y + 1][x + 1] == HIDDEN_FLAGGED: flagCtr += 1
+    if y - 1 >= 0 and hiddenBoard[y - 1][x] == HIDDEN_FLAGGED: flagCtr += 1
+    if x - 1 >= 0 and hiddenBoard[y][x - 1] == HIDDEN_FLAGGED: flagCtr += 1
+    if y + 1 < boardLength and hiddenBoard[y + 1][x] == HIDDEN_FLAGGED: flagCtr += 1
+    if x + 1 < boardLength and hiddenBoard[y][x + 1] == HIDDEN_FLAGGED: flagCtr += 1
+    return flagCtr
+
+def has_wrong_flag():
+    x = selectionX
+    y = selectionY
+    if y - 1 >= 0 and x - 1 >= 0 and hiddenBoard[y - 1][x - 1] == HIDDEN_FLAGGED and board[y - 1][x - 1] != MINE: return True
+    if y - 1 >= 0 and x + 1 < boardLength and hiddenBoard[y - 1][x + 1] == HIDDEN_FLAGGED and board[y - 1][x + 1] != MINE: return True
+    if y + 1 < boardLength and x - 1 >= 0 and hiddenBoard[y + 1][x - 1] == HIDDEN_FLAGGED and board[y + 1][x - 1] != MINE: return True
+    if y + 1 < boardLength and x + 1 < boardLength and hiddenBoard[y + 1][x + 1] == HIDDEN_FLAGGED and board[y + 1][x + 1] != MINE: return True
+    if y - 1 >= 0 and hiddenBoard[y - 1][x] == HIDDEN_FLAGGED and board[y - 1][x] != MINE: return True
+    if x - 1 >= 0 and hiddenBoard[y][x - 1] == HIDDEN_FLAGGED and board[y][x - 1] != MINE: return True
+    if y + 1 < boardLength and hiddenBoard[y + 1][x] == HIDDEN_FLAGGED and board[y + 1][x] != MINE: return True
+    if x + 1 < boardLength and hiddenBoard[y][x + 1] == HIDDEN_FLAGGED and board[y][x + 1] != MINE: return True
+    return False
+
+def select_all_adjacent():
+    x = selectionX
+    y = selectionY
+    numOfMines = get_number_of_mines(board[y][x])
+    numOfFlags = get_number_of_flags(selectionX, selectionY)
+    if numOfMines == numOfFlags:
+        if has_wrong_flag():
+            return LOSE
+        if not is_flag(x - 1, y) and is_hidden(x - 1, y): reveal_cells(x - 1, y)
+        if not is_flag(x, y - 1) and is_hidden(x, y - 1): reveal_cells(x, y - 1)
+        if not is_flag(x + 1, y) and is_hidden(x + 1, y): reveal_cells(x + 1, y)
+        if not is_flag(x, y + 1) and is_hidden(x, y + 1): reveal_cells(x, y + 1)
+        if not is_flag(x - 1, y - 1) and is_hidden(x - 1, y - 1): reveal_cells(x - 1, y - 1)
+        if not is_flag(x - 1, y + 1) and is_hidden(x - 1, y + 1): reveal_cells(x - 1, y + 1)
+        if not is_flag(x + 1, y - 1) and is_hidden(x + 1, y - 1): reveal_cells(x + 1, y - 1)
+        if not is_flag(x + 1, y + 1) and is_hidden(x + 1, y + 1): reveal_cells(x + 1, y + 1)
+    return NONE
+
+def select(selectNum):
+    if selectNum[0] == 0:
+        randomize_board()
+    selectNum[0] += 1
+    if hiddenBoard[selectionY][selectionX] == HIDDEN:
+        if board[selectionY][selectionX] == MINE:
+            hiddenBoard[selectionY][selectionX] = REVEALED
+            draw_cell(selectionY, selectionX)
+            pygame.display.flip()
+            return LOSE
+        else:
+            reveal_cells(selectionX, selectionY)
+    elif is_num(selectionX, selectionY):
+        if select_all_adjacent() == LOSE:
+            return LOSE
+    if hiddenCount == 0:
+        return WIN
+    return NONE
+
+def update_mines_left():
+    global minesLeft
+    minesLeft = initialMines - flagCount
+    if minesLeft < 0:
+        minesLeft = 0
+    update_status_mines_num()
+
+def flag():
+    global flagCount
+    if hiddenBoard[selectionY][selectionX] == HIDDEN:
+        hiddenBoard[selectionY][selectionX] = HIDDEN_FLAGGED
+        flagCount += 1
+    elif hiddenBoard[selectionY][selectionX] == HIDDEN_FLAGGED:
+        hiddenBoard[selectionY][selectionX] = HIDDEN
+        flagCount -= 1
+    update_mines_left()
+    draw_cell(selectionY, selectionX)
+    pygame.display.flip()
+
+def restart():
+    global selectionX, selectionY, flagCount, hiddenCount, minesLeft
+    selectionX = 0
+    selectionY = 0
+    flagCount = 0
+    hiddenCount = (boardLength * boardLength) - initialMines
+    minesLeft = initialMines
+    initialize_board()
+    start_minesweeper()
+
+def start_minesweeper():
+    selectNum = [0]
+    endGame = NONE
+    draw_background()
+    draw_game()
+    while True:
+        key = getch()
+        if key == "w":
+            move_selection("w")
+        elif key == "a":
+            move_selection("a")
+        elif key == "s":
+            move_selection("s")
+        elif key == "d":
+            move_selection("d")
+        elif key == " ":
+            endGame = select(selectNum)
+        elif key == "f":
+            flag()
+        elif key in ("q", "r"):
+            break
+        if endGame in (WIN, LOSE):
+            break
+    if key == "r":
+        restart()
+    elif ((key == "q" and selectNum[0] > 0) or endGame in (WIN, LOSE)) and reveal_all_mines() == "r":
+        restart()
+    if endGame == WIN:
+        minesLeft = 0
+        open_win_announcement_menu()
+        update_status_mines_num()
+
+def reset_variables():
+    global boardLength, selectionX, selectionY, hiddenCount, minesLeft, initialMines, offsetX, offsetY, flagCount, textBoardOffset
+    boardLength = 0
+    selectionX = 0
+    selectionY = 0
+    hiddenCount = 0
+    minesLeft = 0
+    initialMines = 0
+    offsetX = 0
+    offsetY = 0
+    flagCount = 0
+    textBoardOffset = 0
+
+def reveal_all_mines():
+    for i in range(boardLength):
+        for j in range(boardLength):
+            if hiddenBoard[i][j] in (HIDDEN, HIDDEN_FLAGGED) and board[i][j] == MINE:
+                hiddenBoard[i][j] = REVEALED
+                draw_cell(i, j)
+    pygame.display.flip()
+    return getch()
+
+def randomize_mines():
+    mines = minesLeft
+    while mines > 0:
+        x = random.randint(0, boardLength - 1)
+        y = random.randint(0, boardLength - 1)
+        if board[y][x] or (x == selectionX and y == selectionY):
+            continue
+        board[y][x] = MINE
+        mines -= 1
+
+def count_adjacent_mines(i, j):
+    mineCtr = 0
+    if i - 1 >= 0 and j - 1 >= 0 and board[i - 1][j - 1] == MINE: mineCtr += 1
+    if i - 1 >= 0 and j + 1 < boardLength and board[i - 1][j + 1] == MINE: mineCtr += 1
+    if i + 1 < boardLength and j - 1 >= 0 and board[i + 1][j - 1] == MINE: mineCtr += 1
+    if i + 1 < boardLength and j + 1 < boardLength and board[i + 1][j + 1] == MINE: mineCtr += 1
+    if i - 1 >= 0 and board[i - 1][j] == MINE: mineCtr += 1
+    if j - 1 >= 0 and board[i][j - 1] == MINE: mineCtr += 1
+    if i + 1 < boardLength and board[i + 1][j] == MINE: mineCtr += 1
+    if j + 1 < boardLength and board[i][j + 1] == MINE: mineCtr += 1
+    return mineCtr
+
+def update_numbers():
+    for i in range(boardLength):
+        for j in range(boardLength):
+            if board[i][j] != MINE:
+                board[i][j] = count_adjacent_mines(i, j)
+
+def randomize_board():
+    randomize_mines()
+    update_numbers()
+
+def start_game():
+    open_choose_difficulty_menu()
+    initialize_board()
+    start_minesweeper()
+    reset_variables()
+
+def initialize_board():
+    global board, hiddenBoard
+    board = [[EMPTY for _ in range(boardLength)] for _ in range(boardLength)]
+    hiddenBoard = [[HIDDEN for _ in range(boardLength)] for _ in range(boardLength)]
+
+def print_win_announcement_text():
+    write_text(WIN_TEXT, 124, 80, TEXT_COLOR, 1)
+    write_text(PRESS_ANY_KEY, 43, 160, TEXT_COLOR, 0)
+    pygame.display.flip()
+
+def open_win_announcement_menu():
+    draw_background()
+    print_win_announcement_text()
+    key = getch()
+    if key == "r":
+        restart()
+
+def print_choose_difficulty_menu_text():
+    write_text(START_GAME_HEADER, 84, 30, TEXT_COLOR, 1)
+    write_text(EASY_GAME_TEXT, 40, 80, TEXT_COLOR, 0)
+    write_text(MEDIUM_GAME_TEXT, 40, 110, TEXT_COLOR, 0)
+    write_text(HARD_GAME_TEXT, 40, 140, TEXT_COLOR, 0)
+    pygame.display.flip()
+
+def open_choose_difficulty_menu():
+    global boardLength, minesLeft, textBoardOffset, initialMines, hiddenCount, offsetX, offsetY
+    draw_background()
+    print_choose_difficulty_menu_text()
+    while True:
+        key = getch()
+        if key == "1":
+            boardLength = SMALL
+            minesLeft = SMALL_MINES
+            break
+        elif key == "2":
+            boardLength = MEDIUM
+            minesLeft = MEDIUM_MINES
+            break
+        elif key == "3":
+            boardLength = LARGE
+            minesLeft = LARGE_MINES
+            textBoardOffset = TEXT_SIZE + TEXT_LARGE_BOARD_OFFSET
+            break
+    initialMines = minesLeft
+    hiddenCount = (boardLength * boardLength) - initialMines
+    offsetX = (SCREEN_WIDTH - (boardLength * CELL_SIZE)) // 2
+    offsetY = (SCREEN_HEIGHT + textBoardOffset - (boardLength * CELL_SIZE)) // 2
+    draw_background()
+
+def print_controls_menu_text():
+    write_text(CONTROLS_HEADER, 102, 30, TEXT_COLOR, 1)
+    write_text(CONTROLS_MOVE_UP, 90, 70, TEXT_COLOR, 0)
+    write_text(CONTROLS_MOVE_LEFT, 90, 80, TEXT_COLOR, 0)
+    write_text(CONTROLS_MOVE_DOWN, 90, 90, TEXT_COLOR, 0)
+    write_text(CONTROLS_MOVE_RIGHT, 90, 100, TEXT_COLOR, 0)
+    write_text(CONTROLS_SELECT, 90, 110, TEXT_COLOR, 0)
+    write_text(CONTROLS_FLAG, 90, 120, TEXT_COLOR, 0)
+    write_text(CONTROLS_RESTART, 90, 130, TEXT_COLOR, 0)
+    write_text(CONTROLS_QUIT_GAME, 90, 140, TEXT_COLOR, 0)
+    write_text(PRESS_ANY_KEY, 43, 160, TEXT_COLOR, 0)
+    pygame.display.flip()
+
+def open_controls_menu():
+    print_controls_menu_text()
+    _ = getch()
+
+def print_about_menu_text():
+    write_text(ABOUT_HEADER, 138, 30, TEXT_COLOR, 1)
+    write_text(ABOUT_PROJECT_INFO_1, 102, 62, TEXT_COLOR, 0)
+    write_text(ABOUT_PROJECT_INFO_2, 111, 72, TEXT_COLOR, 0)
+    write_text(ABOUT_UI, 124, 90, TEXT_COLOR, 0)
+    write_text(ABOUT_UI_TEXT, 75, 105, TEXT_COLOR, 0)
+    write_text(ABOUT_IMPLEMENTATION, 93, 125, TEXT_COLOR, 0)
+    write_text(ABOUT_IMPLEMENTATION_TEXT, 79, 138, TEXT_COLOR, 0)
+    write_text(PRESS_ANY_KEY, 43, 160, TEXT_COLOR, 0)
+    pygame.display.flip()
+
+def open_about_menu():
+    print_about_menu_text()
+    _ = getch()
+
+def print_main_menu_text():
+    write_text(LOGO_MENU_TEXT, 111, 30, TEXT_COLOR, 1)
+    write_text(START_MENU_TEXT, 95, 70, TEXT_COLOR, 0)
+    write_text(CONTROLS_MENU_TEXT, 95, 95, TEXT_COLOR, 0)
+    write_text(ABOUT_MENU_TEXT, 95, 120, TEXT_COLOR, 0)
+    write_text(EXIT_MENU_TEXT, 95, 145, TEXT_COLOR, 0)
+    pygame.display.flip()
+
+def open_main_menu():
+    draw_background()
+    print_main_menu_text()
+    while True:
+        key = getch()
+        if key == "1":
+            draw_background()
+            start_game()
+            draw_background()
+        elif key == "2":
+            draw_background()
+            open_controls_menu()
+            draw_background()
+        elif key == "3":
+            draw_background()
+            open_about_menu()
+            draw_background()
+        elif key == "4":
+            break
+        if key in ("1", "2", "3"):
+            print_main_menu_text()
+
+def getch():
+    while True:
+        event = pygame.event.wait()
+        if event.type == pygame.KEYDOWN:
+            if event.unicode != "":
+                return event.unicode
+            else:
+                return pygame.key.name(event.key)
+
+def main():
+    open_main_menu()
+    pygame.quit()
+    sys.exit()
+
+if __name__ == "__main__":
+    main()
