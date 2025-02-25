@@ -1,3 +1,14 @@
+# Minesweeper
+
+![Screenshot1](/screenshots/1.png)
+![Screenshot2](/screenshots/2.png)
+
+This is a simple implementation of the classic game Minesweeper for ICS-OS. It is a project for the course CMSC 125 (Operating Systems) at the University of the Philippines Los Banos.
+
+Originally made in C. Ported to Python using ChatGPT o3-mini-high. Python code is in the `python-port` directory.
+
+Publicly available and playable in Replit: [https://replit.com/@KeithManaloto/Minesweeper](https://replit.com/@KeithManaloto/Minesweeper?v=1)
+
 ## Setting Up ICS-OS and Minesweeper
 
 In your terminal, type the following:
